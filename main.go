@@ -81,7 +81,9 @@ func handleRequest() http.HandlerFunc {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		app.mux.RLock()
 		serviceUserId, ok := record.serviceKeys[service]
+		app.mux.RUnlock()
 		if !ok {
 			id, err := uuid.GenerateUUID()
 			if err != nil {
