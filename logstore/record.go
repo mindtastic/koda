@@ -118,7 +118,7 @@ func (r *Record) Serialize() []byte {
 
 	// Calculate checksum
 	crc := crc32.NewIEEE()
-	crc.Write(serializedRecord)
+	crc.Write(serializedRecord[4:])
 	binary.BigEndian.PutUint32(serializedRecord, crc.Sum32())
 
 	return serializedRecord
