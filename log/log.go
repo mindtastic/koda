@@ -48,6 +48,8 @@ type Logger interface {
 	io.Closer
 
 	Level() Level
+	Run()
+	IsRunning() bool
 	Log(level Level, pkg string, file string, line int, format string, args ...interface{})
 }
 
@@ -124,16 +126,20 @@ func Set(logger Logger) {
 func instance() Logger {
 	instMu.RLock()
 	l := inst
+	if !l.IsRunning() {
+		l.Run()
+	}
 	instMu.RUnlock()
 	return l
 }
 
 type logger struct {
-	level Level
-	out   io.Writer
-	files []io.WriteCloser
-	b     strings.Builder
-	recCh chan record
+	level  Level
+	out    io.Writer
+	files  []io.WriteCloser
+	b      strings.Builder
+	active bool
+	recCh  chan record
 }
 
 type record struct {
@@ -184,6 +190,14 @@ func (l *logger) Level() Level {
 	return l.level
 }
 
+func (l *logger) IsRunning() bool {
+	return l.active
+}
+
+func (l *logger) Run() {
+	go l.mainLoop()
+}
+
 func (l *logger) Log(level Level, pkg string, file string, line int, format string, args ...interface{}) {
 	entity := record{
 		level:      level,
@@ -211,6 +225,8 @@ func (l *logger) Close() error {
 
 func (l *logger) mainLoop() {
 	for {
+		l.active = true
+
 		select {
 		case rec, ok := <-l.recCh:
 			if !ok {
@@ -220,6 +236,7 @@ func (l *logger) mainLoop() {
 				}
 
 				// Abort main loop execution
+				l.active = false
 				return
 			}
 
