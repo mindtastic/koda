@@ -62,7 +62,8 @@ func handleRequest() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		accountKey, ok := r.Context().Value(accountKeyCtxKey).(AccountKey)
 		if !ok {
-			// Handle me
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 
 		app.mux.Lock()
@@ -77,13 +78,15 @@ func handleRequest() http.HandlerFunc {
 
 		service, ok := r.Context().Value(serviceCtxKey).(string)
 		if !ok {
-
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 		serviceUserId, ok := record.serviceKeys[service]
 		if !ok {
 			id, err := uuid.GenerateUUID()
 			if err != nil {
-				//idk
+				w.WriteHeader(http.StatusInternalServerError)
+				return
 			}
 			app.mux.Lock()
 			serviceUserId = id
