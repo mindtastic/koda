@@ -39,3 +39,8 @@ func split(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	token = data[:advance]
 	return
 }
+
+func (s *Scanner) Record() *Record {
+	r, _ := Deserialize(s.Bytes())
+	return r
+}
