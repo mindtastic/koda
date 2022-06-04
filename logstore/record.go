@@ -26,7 +26,7 @@ var ErrInsufficientData = errors.New("insufficient bytes to parse a record")
 // ErrCorruptData is returned when the crc checksum is not matching the provided serialized data
 var ErrCorruptData = errors.New("crc checksum doesnt match the provided record data")
 
-func NewValue(key string, value []byte) *Record {
+func NewRecord(key string, value []byte) *Record {
 	return &Record{
 		kind:  kindValue,
 		key:   key,
@@ -85,6 +85,10 @@ func (r *Record) Value() []byte {
 
 func (r *Record) IsTombstone() bool {
 	return r.kind == kindTombstone
+}
+
+func (r *Record) Size() int {
+	return headerLength + len(r.key) + len(r.value)
 }
 
 // Serialize serializes a record into the specified binary format
