@@ -2,7 +2,6 @@ package logstore
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"testing"
 )
@@ -49,9 +48,8 @@ func TestStore(t *testing.T) {
 		t.Fatalf("Error deleting from database")
 	}
 
-	var notFoundErr *NotFoundError
 	data, err = store.Get(testKey)
-	if !errors.As(err, &notFoundErr) {
+	if !IsNotFoundError(err) {
 		if err != nil {
 			t.Fatalf("internal error on fetching from db: %v", err)
 		}
