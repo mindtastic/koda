@@ -1,30 +1,24 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
 	"sync"
 
+	"github.com/hashicorp/go-uuid"
 	"github.com/mindtastic/koda/log"
-
-	"github.com/julienschmidt/httprouter"
 )
 
-var port = flag.Int("port", 8000, "Port to listen on for API connections")
+var addr = flag.String("addr", ":8000", "Address to listen on for API connections")
 
 // AccountKey is a 128 bit value string used to identify users
 type AccountKey string
 
-const accountKeyLen = 2*16 + 4
-
 // Record stores multiple user ids
 type Record struct {
-	userService  string
-	wikiService  string
-	moodDiary    string
-	motivator    string
-	notifcations string
+	serviceKeys map[string]string
 }
 
 type Application struct {
@@ -38,19 +32,14 @@ var app *Application
 func main() {
 	flag.Parse()
 
-	router := httprouter.New()
-	// GET /{account_key}			<--- Specific services fetches its user_id for a given account key
-	router.GET("/:account_key", ValidateAccountKey(FetchUserId))
-	// POST /{account_key}			<--- Creates random user ids for a given account_key
-	router.POST("/:account_key", ValidateAccountKey(CreateId))
 	// Later:
 	// PUT /{account_key}/rotate	<--- Rotates keys for a given ide
 
 	app = &Application{
 		db: map[AccountKey]Record{},
 		httpServer: &http.Server{
-			Addr:    fmt.Sprintf(":%v", *port),
-			Handler: router,
+			Addr:    *addr,
+			Handler: validateRequest(handleRequest()),
 		},
 	}
 
@@ -58,46 +47,84 @@ func main() {
 	log.Fatal(app.httpServer.ListenAndServe())
 }
 
-func FetchUserId(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+type ctxKey string
 
-}
+const (
+	accountKeyHeader = "X-AccountKey"
+	serviceHeader    = "X-ForService"
+	userIDHeader     = "X-User-ID"
 
-func CreateId(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-	accountKey := AccountKey(ps.ByName("account_key"))
-	// record := createRandomRecord()
+	accountKeyCtxKey ctxKey = "accountkey"
+	serviceCtxKey    ctxKey = "service"
+)
 
-	app.mux.Lock()
-	defer app.mux.Unlock()
-
-	_, exists := app.db[accountKey]
-	if exists {
-		log.Warnf("Host %v requested id creation for known account_key: %v", r.Host, accountKey)
-		http.Error(w, "", http.StatusConflict)
-		return
-	}
-
-}
-
-func ValidateAccountKey(next httprouter.Handle) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		log.Debugf("Validating request '%v'", r.RequestURI)
-		accountKey := ps.ByName("account_key")
-
-		if len(accountKey) != accountKeyLen {
-			log.Debugf("account key string '%v' rejected for invalid length", accountKey)
-			http.Error(w, "account key string is wrong length", http.StatusBadRequest)
+func handleRequest() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		accountKey, ok := r.Context().Value(accountKeyCtxKey).(AccountKey)
+		if !ok {
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		if accountKey[8] != '-' ||
-			accountKey[13] != '-' ||
-			accountKey[18] != '-' ||
-			accountKey[23] != '-' {
-			log.Debugf("account key string '%v' rejected for invalid format", accountKey)
+		app.mux.Lock()
+		record, ok := app.db[accountKey]
+		if !ok {
+			record = Record{
+				serviceKeys: make(map[string]string),
+			}
+			app.db[accountKey] = record
+		}
+		app.mux.Unlock()
+
+		service, ok := r.Context().Value(serviceCtxKey).(string)
+		if !ok {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		app.mux.RLock()
+		serviceUserId, ok := record.serviceKeys[service]
+		app.mux.RUnlock()
+		if !ok {
+			id, err := uuid.GenerateUUID()
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			app.mux.Lock()
+			serviceUserId = id
+			record.serviceKeys[service] = serviceUserId
+			app.db[accountKey] = record
+			app.mux.Unlock()
+		}
+
+		w.Header().Set(userIDHeader, fmt.Sprintf("Bearer %s", serviceUserId))
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func validateRequest(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		accountKey := r.Header.Get(accountKeyHeader)
+		if accountKey == "" {
+			http.Error(w, fmt.Sprintf("missing required header: %v", accountKeyHeader), http.StatusBadRequest)
+			return
+		}
+
+		_, err := uuid.ParseUUID(accountKey)
+		if err != nil {
 			http.Error(w, "account key is improperly formatted", http.StatusBadRequest)
 			return
 		}
 
-		next(w, r, ps)
+		serviceName := r.Header.Get(serviceHeader)
+		if serviceName == "" {
+			http.Error(w, fmt.Sprintf("missing required header: %v", serviceHeader), http.StatusBadRequest)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), accountKeyCtxKey, AccountKey(accountKey))
+		ctx = context.WithValue(ctx, serviceCtxKey, serviceName)
+
+		next.ServeHTTP(w, r.WithContext(ctx))
 	}
 }
