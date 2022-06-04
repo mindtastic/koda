@@ -1,0 +1,16 @@
+{
+  "subject": "4a0add80-4dac-4f87-9ba7-d062f6f0ca09",
+  "extra": {},
+  "header": {},
+  "match_context": {
+    "regex_capture_groups": [
+      "name-of-the-best-service-in-the-world",
+      "service-args"
+    ]
+  },
+  "url": {
+    "Scheme": "https",
+    "Host": "bs.api.example.com",
+    "Path": "/bs"
+  }
+}
