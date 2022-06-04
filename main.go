@@ -62,7 +62,7 @@ func main() {
 		db: map[AccountKey]Record{},
 		httpServer: &http.Server{
 			Addr:    *addr,
-			Handler: handleRequest(),
+			Handler: &mux,
 		},
 	}
 
