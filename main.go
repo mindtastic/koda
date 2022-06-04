@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 
 	"github.com/hashicorp/go-uuid"
@@ -80,7 +81,7 @@ type OathkeeperPayload struct {
 	Header       http.Header            `json:"header"`
 	MatchContext struct {
 		RegexpCaptureGroups []string `json:"regexp_capture_groups"`
-		URL                 string   `json:"url"`
+		URL                 url.URL  `json:"url"`
 	} `json:"match_context"`
 }
 
