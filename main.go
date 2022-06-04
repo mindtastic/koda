@@ -1,57 +1,86 @@
 package main
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
-	"sync"
+	"os"
 
 	"github.com/hashicorp/go-uuid"
 	"github.com/mindtastic/koda/log"
+	"github.com/mindtastic/koda/logstore"
 )
 
 var addr = flag.String("addr", ":8000", "Address to listen on for API connections")
 
 // AccountKey is a 128 bit value string used to identify users
-type AccountKey string
+type AccountKey = string
 
 // Record stores multiple user ids
 type Record struct {
-	serviceKeys map[string]string
+	ServiceKeys map[string]string
+}
+
+func NewRecord() *Record {
+	return &Record{
+		ServiceKeys: make(map[string]string),
+	}
 }
 
 type Application struct {
-	mux        sync.RWMutex
-	db         map[AccountKey]Record
+	db         *logstore.Store
 	httpServer *http.Server
 }
 
 var app *Application
 
-func (a *Application) recordForKey(key AccountKey) (Record, bool) {
-	a.mux.RLock()
-	defer a.mux.RUnlock()
-	record, ok := app.db[key]
-	return record, ok
+func (a *Application) storeRecord(k AccountKey, r *Record) error {
+	var buffer bytes.Buffer
+	enc := gob.NewEncoder(&buffer)
+
+	if err := enc.Encode(*r); err != nil {
+		return fmt.Errorf("error serializing record to binary: %v", err)
+	}
+
+	return a.db.Set(k, buffer.Bytes())
 }
 
-func (a *Application) getUserIdsFor(key AccountKey) Record {
-	record, ok := a.recordForKey(key)
-	if !ok {
-		a.mux.Lock()
-		record = Record{
-			serviceKeys: make(map[string]string),
-		}
-		app.db[key] = record
-		a.mux.Unlock()
+func (a *Application) fetchRecordByKey(key AccountKey) (*Record, error) {
+	rawRecord, err := a.db.Get(key)
+	if logstore.IsNotFoundError(err) {
+		// The account key does not exist so far in the database. Create it one-the-fly.
+		return NewRecord(), nil
+	} else if err != nil {
+		return nil, err
 	}
-	return record
+
+	buf := bytes.NewBuffer(rawRecord)
+	dec := gob.NewDecoder(buf)
+
+	var r Record
+	if err := dec.Decode(&r); err != nil {
+		return nil, fmt.Errorf("error decoding fetched binary data for key %v: %v", key, err)
+	}
+
+	return &r, nil
 }
 
 func main() {
 	flag.Parse()
+
+	workdir, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("error accessing working directory for database: %v", err)
+	}
+
+	db, err := logstore.NewStore(workdir)
+	if err != nil {
+		log.Fatalf("error creating/accessing db: %v", err)
+	}
 
 	mux := http.ServeMux{}
 	mux.Handle("/", handleRequest())
@@ -60,7 +89,7 @@ func main() {
 	// PUT /{account_key}/rotate	<--- Rotates keys for a given ide
 
 	app = &Application{
-		db: map[AccountKey]Record{},
+		db: db,
 		httpServer: &http.Server{
 			Addr:    *addr,
 			Handler: &mux,
@@ -119,12 +148,15 @@ func handleRequest() http.HandlerFunc {
 		}
 		accountKey := AccountKey(requestPayload.Subject)
 
-		record := app.getUserIdsFor(accountKey)
-		service := requestPayload.ServiceName()
+		record, err := app.fetchRecordByKey(accountKey)
+		if err != nil {
+			log.Errorf("database error: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 
-		app.mux.RLock()
-		serviceUserId, ok := record.serviceKeys[service]
-		app.mux.RUnlock()
+		service := requestPayload.ServiceName()
+		serviceUserId, ok := record.ServiceKeys[service]
 		if !ok {
 			id, err := uuid.GenerateUUID()
 			if err != nil {
@@ -132,11 +164,14 @@ func handleRequest() http.HandlerFunc {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			app.mux.Lock()
 			serviceUserId = id
-			record.serviceKeys[service] = serviceUserId
-			app.db[accountKey] = record
-			app.mux.Unlock()
+			record.ServiceKeys[service] = serviceUserId
+			err = app.storeRecord(accountKey, record)
+			if err != nil {
+				log.Errorf("database error: %v", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 		}
 
 		response := requestPayload
