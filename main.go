@@ -52,6 +52,9 @@ func (a *Application) getUserIdsFor(key AccountKey) Record {
 func main() {
 	flag.Parse()
 
+	mux := http.ServeMux{}
+	mux.Handle("/", handleRequest())
+	mux.Handle("/health", handleHealthcheck())
 	// Later:
 	// PUT /{account_key}/rotate	<--- Rotates keys for a given ide
 
@@ -84,6 +87,12 @@ type OathkeeperPayload struct {
 func (p OathkeeperPayload) ServiceName() string {
 	log.Warnf("Service extracted from payload is hardcoded to user-service")
 	return "user-service"
+}
+
+func handleHealthcheck() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 func handleRequest() http.HandlerFunc {
