@@ -1,7 +1,7 @@
 package main
 
 import (
-	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -29,6 +29,26 @@ type Application struct {
 
 var app *Application
 
+func (a *Application) recordForKey(key AccountKey) (Record, bool) {
+	a.mux.RLock()
+	defer a.mux.RUnlock()
+	record, ok := app.db[key]
+	return record, ok
+}
+
+func (a *Application) getUserIdsFor(key AccountKey) Record {
+	record, ok := a.recordForKey(key)
+	if !ok {
+		a.mux.Lock()
+		record = Record{
+			serviceKeys: make(map[string]string),
+		}
+		app.db[key] = record
+		a.mux.Unlock()
+	}
+	return record
+}
+
 func main() {
 	flag.Parse()
 
@@ -39,7 +59,7 @@ func main() {
 		db: map[AccountKey]Record{},
 		httpServer: &http.Server{
 			Addr:    *addr,
-			Handler: validateRequest(handleRequest()),
+			Handler: handleRequest(),
 		},
 	}
 
@@ -47,46 +67,55 @@ func main() {
 	log.Fatal(app.httpServer.ListenAndServe())
 }
 
-type ctxKey string
-
 const (
-	accountKeyHeader = "X-AccountKey"
-	serviceHeader    = "X-ForService"
-	userIDHeader     = "X-User-ID"
-
-	accountKeyCtxKey ctxKey = "accountkey"
-	serviceCtxKey    ctxKey = "service"
+	userIdExtraKey = "userID"
 )
+
+type OathkeeperPayload struct {
+	Subject      string                 `json:"subject"`
+	Extra        map[string]interface{} `json:"extra"`
+	Header       http.Header            `json:"header"`
+	MatchContext struct {
+		RegexpCaptureGroups []string `json:"regexp_capture_groups"`
+		URL                 string   `json:"url"`
+	} `json:"match_context"`
+}
+
+func (p OathkeeperPayload) ServiceName() string {
+	log.Warnf("Service extracted from payload is hardcoded to user-service")
+	return "user-service"
+}
 
 func handleRequest() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		accountKey, ok := r.Context().Value(accountKeyCtxKey).(AccountKey)
-		if !ok {
-			w.WriteHeader(http.StatusInternalServerError)
+		if r.Method != http.MethodPost {
+			http.Error(w, "invalid method", http.StatusBadRequest)
 			return
 		}
 
-		app.mux.Lock()
-		record, ok := app.db[accountKey]
-		if !ok {
-			record = Record{
-				serviceKeys: make(map[string]string),
-			}
-			app.db[accountKey] = record
-		}
-		app.mux.Unlock()
-
-		service, ok := r.Context().Value(serviceCtxKey).(string)
-		if !ok {
-			w.WriteHeader(http.StatusInternalServerError)
+		var requestPayload OathkeeperPayload
+		d := json.NewDecoder(r.Body)
+		if err := d.Decode(&requestPayload); err != nil {
+			http.Error(w, fmt.Sprintf("malformed request: %v", err), http.StatusBadRequest)
 			return
 		}
+
+		if _, err := uuid.ParseUUID(requestPayload.Subject); err != nil {
+			http.Error(w, "subject must be a valid account key", http.StatusBadRequest)
+			return
+		}
+		accountKey := AccountKey(requestPayload.Subject)
+
+		record := app.getUserIdsFor(accountKey)
+		service := requestPayload.ServiceName()
+
 		app.mux.RLock()
 		serviceUserId, ok := record.serviceKeys[service]
 		app.mux.RUnlock()
 		if !ok {
 			id, err := uuid.GenerateUUID()
 			if err != nil {
+				log.Errorf("error generating new id: %v", err)
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -97,34 +126,14 @@ func handleRequest() http.HandlerFunc {
 			app.mux.Unlock()
 		}
 
-		w.Header().Set(userIDHeader, fmt.Sprintf("Bearer %s", serviceUserId))
-		w.WriteHeader(http.StatusOK)
-	}
-}
+		response := requestPayload
+		response.Extra[userIdExtraKey] = serviceUserId
 
-func validateRequest(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		accountKey := r.Header.Get(accountKeyHeader)
-		if accountKey == "" {
-			http.Error(w, fmt.Sprintf("missing required header: %v", accountKeyHeader), http.StatusBadRequest)
+		e := json.NewEncoder(w)
+		if err := e.Encode(response); err != nil {
+			log.Errorf("error json encoding response: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-
-		_, err := uuid.ParseUUID(accountKey)
-		if err != nil {
-			http.Error(w, "account key is improperly formatted", http.StatusBadRequest)
-			return
-		}
-
-		serviceName := r.Header.Get(serviceHeader)
-		if serviceName == "" {
-			http.Error(w, fmt.Sprintf("missing required header: %v", serviceHeader), http.StatusBadRequest)
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), accountKeyCtxKey, AccountKey(accountKey))
-		ctx = context.WithValue(ctx, serviceCtxKey, serviceName)
-
-		next.ServeHTTP(w, r.WithContext(ctx))
 	}
 }
