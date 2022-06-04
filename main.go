@@ -98,6 +98,7 @@ func handleHealthcheck() http.HandlerFunc {
 func handleRequest() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
+			log.Errorf("received non-POST request")
 			http.Error(w, "invalid method", http.StatusBadRequest)
 			return
 		}
@@ -105,11 +106,13 @@ func handleRequest() http.HandlerFunc {
 		var requestPayload OathkeeperPayload
 		d := json.NewDecoder(r.Body)
 		if err := d.Decode(&requestPayload); err != nil {
+			log.Errorf("error decoding JSON body: %v", err)
 			http.Error(w, fmt.Sprintf("malformed request: %v", err), http.StatusBadRequest)
 			return
 		}
 
 		if _, err := uuid.ParseUUID(requestPayload.Subject); err != nil {
+			log.Errorf("error parsing accountKey: %v", err)
 			http.Error(w, "subject must be a valid account key", http.StatusBadRequest)
 			return
 		}
@@ -124,7 +127,7 @@ func handleRequest() http.HandlerFunc {
 		if !ok {
 			id, err := uuid.GenerateUUID()
 			if err != nil {
-				log.Errorf("error generating new id: %v", err)
+				log.Errorf("error generating new service ID: %v", err)
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -140,7 +143,7 @@ func handleRequest() http.HandlerFunc {
 
 		e := json.NewEncoder(w)
 		if err := e.Encode(response); err != nil {
-			log.Errorf("error json encoding response: %v", err)
+			log.Errorf("error encoding JSON response: %v", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
