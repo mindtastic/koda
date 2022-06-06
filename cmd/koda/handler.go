@@ -103,7 +103,6 @@ func (a *application) handleRequest() http.HandlerFunc {
 
 		response := requestPayload
 		response.Extra[userIdExtraKey] = serviceUserId
-		response.Header.Set(userIdExtraKey, string(serviceUserId))
 
 		e := json.NewEncoder(w)
 		if err := e.Encode(response); err != nil {
