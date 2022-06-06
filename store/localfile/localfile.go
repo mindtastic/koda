@@ -138,7 +138,7 @@ func (l *LocalFileStore) Get(key koda.AccountKey) (koda.Record, error) {
 	}
 	r, ok := l.store[key]
 	if !ok {
-		return koda.Record{}, fmt.Errorf("could not get key %s: %v", key, koda.ErrNotFound)
+		return koda.Record{}, fmt.Errorf("could not get key %s: %w", key, koda.ErrNotFound)
 	}
 	return r, nil
 }

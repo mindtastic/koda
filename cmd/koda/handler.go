@@ -68,10 +68,19 @@ func (a *application) handleRequest() http.HandlerFunc {
 		accountKey := koda.AccountKey(requestPayload.Subject)
 
 		record, err := a.store.Get(accountKey)
-		if err != nil && !errors.Is(err, koda.ErrNotFound) {
-			log.Errorf("error getting record for AccountKey %q from store: %v", accountKey, err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+		if err != nil {
+			if !errors.Is(err, koda.ErrNotFound) {
+				log.Errorf("error getting record for AccountKey %q from store: %v", accountKey, err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			id, err := uuid.GenerateUUID()
+			if err != nil {
+				log.Errorf("error generating new AccountKey: %v", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			record.AccountKey = koda.AccountKey(id)
 		}
 
 		serviceName := serviceName(requestPayload)
