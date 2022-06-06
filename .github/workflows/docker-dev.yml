@@ -30,7 +30,7 @@ jobs:
         run: go vet .
 
       - name: Run tests
-        run: go test -v
+        run: go test -v ./...
 
       - name: Build image
         run: docker build . --tag "ghcr.io/${GITHUB_REPOSITORY}:dev-${GITHUB_SHA}"
