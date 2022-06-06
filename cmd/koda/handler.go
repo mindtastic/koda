@@ -81,6 +81,7 @@ func (a *application) handleRequest() http.HandlerFunc {
 				return
 			}
 			record.AccountKey = koda.AccountKey(id)
+			record.ServiceKeys = make(map[string]koda.ServiceKey)
 		}
 
 		serviceName := serviceName(requestPayload)
