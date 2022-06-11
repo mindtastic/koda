@@ -11,7 +11,7 @@ COPY . .
 ENV CGO_ENABLED=0
 ENV GOOS=linux
 ENV GOARCH=amd64
-RUN go build -ldflags="-s -w" -o koda .
+RUN go build -ldflags="-s -w" -o koda cmd/koda/*.go
 
 FROM scratch
 

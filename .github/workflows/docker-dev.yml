@@ -2,9 +2,12 @@ name: Build and Push image
 
 on:
   push:
-    branches:
-      - master
-      - main
+    branches:    
+      - '*'         # matches every branch that doesn't contain a '/'
+      - '*/*'       # matches every branch containing a single '/'
+      - '**'        # matches every branch
+      - '!master'   # excludes master
+      - '!main'   # excludes master
 
 jobs:
   # Push image to GitHub Packages.
@@ -30,7 +33,7 @@ jobs:
         run: go test -v ./...
 
       - name: Build image
-        run: docker build . --tag "ghcr.io/${GITHUB_REPOSITORY}:${GITHUB_SHA}"
+        run: docker build . --tag "ghcr.io/${GITHUB_REPOSITORY}:dev-${GITHUB_SHA}"
 
       - name: Log in to registry
         # This is where you will update the PAT to GITHUB_TOKEN
@@ -38,4 +41,4 @@ jobs:
 
       - name: Push image
         run: |
-          docker push ghcr.io/$GITHUB_REPOSITORY:$GITHUB_SHA
+          docker push ghcr.io/$GITHUB_REPOSITORY:dev-$GITHUB_SHA
